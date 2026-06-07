@@ -1,0 +1,24 @@
+# Demo benchmark configuration.
+#
+# `input_dir` and `distortions` are the parts you extend over time:
+#   - drop your own images into the folder below (user-provided set)
+#   - add distortion names here as they are implemented
+#
+# Algorithms must be installed for them to run; missing ones are skipped with a
+# message. On a box without the torch backends, this config simply reports that
+# none ran — wire in your images + backends on the VPS, then commit results.json.
+
+algorithms:
+  - trustmark
+  - pixelseal
+  - wam
+
+input_dir: ./img              # your real image folder (searched recursively)
+
+distortions:
+  - none                      # no-distortion baseline; add jpeg/blur/crop/... later
+
+seed: 0
+success_threshold: 0.99
+output_dir: ./results
+resume: true              # reuse cached results; only compute new distortions/algos (fresh run: delete .runs)

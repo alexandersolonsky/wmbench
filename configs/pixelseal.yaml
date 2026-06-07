@@ -1,0 +1,45 @@
+# pixelseal benchmark run — executed in its own isolated environment (see scripts/run_all.sh).
+algorithms: [pixelseal_sw0.2, pixelseal_sw0.4]
+input_dir: ./img_pruned     # curated lean set (redundancy-pruned)
+distortions:
+  - none
+  - jpeg_q80
+  - jpeg_q50
+  - jpeg_q20
+  - avc_crf15
+  - avc_crf22
+  - avc_crf28
+  - resize_80
+  - resize_50
+  - resize_20
+  - crop_80
+  - crop_50
+  - crop_20
+  - rotate_5
+  - rotate_10
+  - rotate_15
+  - shear_x_10
+  - shear_y_10
+  - affine
+  - gauss_noise_10
+  - gauss_noise_20
+  - gauss_noise_40
+  - uniform_noise_10
+  - uniform_noise_20
+  - uniform_noise_40
+  - gblur_1
+  - gblur_2
+  - gblur_4
+  - sharpen_1
+  - sharpen_2
+  - sharpen_3
+  - brightness_down
+  - brightness_up
+  - contrast_high
+  - grayscale
+  - hue_180
+  - gamma_0.5
+  - telea_grid
+output_dir: ./.runs/ps
+save_samples: 200          # gallery entries (algo×image) saved for the web viewer
+resume: true              # reuse cached results; only compute new distortions/algos (fresh run: delete .runs)

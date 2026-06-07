@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>wmbench — watermarking benchmark</title>
+<style>
+  :root { --bg:#0f1117; --card:#181b24; --fg:#e6e6e6; --muted:#9aa0aa; --line:#2a2f3a; --accent:#5aa9ff; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+  header, main { max-width:1100px; margin:0 auto; padding:24px; }
+  header { border-bottom:1px solid var(--line); }
+  h1 { margin:0 0 6px; font-size:24px; }
+  h2 { margin:32px 0 12px; font-size:18px; border-left:3px solid var(--accent); padding-left:10px; }
+  .muted { color:var(--muted); font-size:13px; }
+  .cards { display:flex; flex-wrap:wrap; gap:12px; margin-top:12px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; }
+  .chart-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:16px; }
+  .chart-box { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px; }
+  table { width:100%; border-collapse:collapse; margin-top:8px; font-size:13px; }
+  th, td { text-align:left; padding:6px 10px; border-bottom:1px solid var(--line); }
+  th { color:var(--muted); font-weight:600; }
+  td.num { text-align:right; font-variant-numeric:tabular-nums; }
+  .pill { display:inline-block; padding:1px 8px; border-radius:999px; font-size:12px; border:1px solid var(--line); }
+  .ok { color:#7ee787; } .bad { color:#ff7b72; } .na { color:var(--muted); }
+  .gallery { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:16px; }
+  .trip img { width:100%; border-radius:6px; border:1px solid var(--line); display:block; }
+  .trip figcaption { font-size:12px; color:var(--muted); margin-top:4px; }
+  .row3 { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  code { background:#11141b; padding:1px 5px; border-radius:4px; }
+  /* image viewer */
+  #gstage { display:flex; justify-content:center; background:#000; border:1px solid var(--line); border-radius:8px; padding:6px; }
+  #gview { max-width:100%; display:block; cursor:zoom-in; }
+  .pill.active { background:var(--accent); color:#06121f; border-color:var(--accent); }
+  /* before/after comparison slider */
+  #gsplitview.compare { position:relative; overflow:hidden; width:100%; aspect-ratio:16 / 9; user-select:none; touch-action:none; line-height:0; }
+  #gsplitview.compare > img, #gsplitview.compare > canvas { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+  #gsplitview .cmp-handle { position:absolute; top:0; bottom:0; left:50%; width:2px; margin-left:-1px; background:#fff; cursor:ew-resize; }
+  #gsplitview .cmp-grip { position:absolute; top:50%; left:50%; width:32px; height:32px; margin:-16px 0 0 -16px; border-radius:50%; background:#fff; box-shadow:0 0 0 2px rgba(0,0,0,.5); }
+  #gsplitview .cmp-label { position:absolute; top:8px; padding:2px 8px; font-size:12px; color:#fff; background:rgba(0,0,0,.6); border-radius:4px; line-height:1.5; }
+  #gsplitview .cmp-left { left:8px; } #gsplitview .cmp-right { right:8px; }
+  /* fullscreen the whole viewer so the controls stay available */
+  #gviewer:fullscreen { background:var(--bg); padding:14px; box-sizing:border-box;
+                        height:100vh; width:100vw; display:flex; flex-direction:column; gap:8px; }
+  #gviewer:fullscreen #gstage { flex:1 1 auto; min-height:0; align-items:center; }
+  #gviewer:fullscreen #gview { max-height:100%; object-fit:contain; }
+  #gviewer:fullscreen #gsplitview.compare { width:auto; height:100%; }
+</style>
+</head>
+<body>
+{% macro fmt(x, nd=2) -%}
+  {%- if x is none -%}<span class="na">—</span>{%- else -%}{{ "%.*f"|format(nd, x) }}{%- endif -%}
+{%- endmacro %}
+<header>
+  <h1>wmbench &mdash; image watermarking benchmark</h1>
+</header>
+
+<main>
+  {% if agg.n_results == 0 %}
+  <p class="muted">No results yet. Run <code>python -m wmbench.runner configs/demo.yaml</code>
+     on a machine with the backends + your images, then rebuild this page.</p>
+  {% endif %}
+
+  <h2>Quality vs. extraction rate</h2>
+  <p class="muted">One point per algorithm. X = extraction rate (fraction of images
+    where the extracted watermark ID exactly equals the embedded one);
+    Y = the selected quality metric.</p>
+  <div style="display:flex; gap:16px; align-items:flex-start">
+    <div style="min-width:170px; flex:0 0 auto; display:flex; flex-direction:column; gap:12px">
+      <div>
+        <label class="muted" for="qmetric">Y axis: quality metric</label><br>
+        <select id="qmetric" style="margin-top:6px;width:100%;background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 8px"></select>
+      </div>
+      <div>
+        <label class="muted" for="qgroup">X axis: group</label><br>
+        <select id="qgroup" style="margin-top:6px;width:100%;background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 8px"></select>
+      </div>
+      <div>
+        <label class="muted" for="qdist">…distortion</label><br>
+        <select id="qdist" style="margin-top:6px;width:100%;background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 8px"></select>
+      </div>
+    </div>
+    <div class="chart-box" style="flex:1 1 auto; min-width:0"><canvas id="scatter"></canvas></div>
+  </div>
+
+  <p class="muted" style="margin-top:14px">
+    <strong>Timing (CPU)</strong> —
+    {% for p in agg.points %}{{ p.algo }}: embed {{ fmt(p.mean_embed_s, 3) }}s / extract {{ fmt(p.mean_extract_s, 3) }}s{% if not loop.last %} · {% endif %}{% endfor %}
+  </p>
+
+  {% if agg.algorithm_settings %}
+  <h2>Watermarking algorithm settings</h2>
+  <p class="muted">Configuration each algorithm ran with (all CPU).</p>
+  <table>
+    <thead><tr><th>Algorithm</th><th>Settings used</th></tr></thead>
+    <tbody>
+      {% for algo in agg.algorithms %}
+      {% set s = agg.algorithm_settings.get(algo) or {} %}
+      <tr><td>{{ algo }}</td>
+        <td>{% for k, v in s.items() %}{{ k }} = {{ v if v is not none else "—" }}{% if not loop.last %} · {% endif %}{% endfor %}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  {% if agg.gallery %}
+  <h2>Image viewer</h2>
+  <div id="gviewer">
+  <div style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap">
+    <div><label class="muted" for="gimg">Image</label><br>
+      <select id="gimg" style="margin-top:4px;background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 8px"></select></div>
+    <div><label class="muted" for="galgo">Algorithm</label><br>
+      <select id="galgo" style="margin-top:4px;background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 8px"></select></div>
+    <div id="gmodes">
+      <button class="pill" data-mode="source"      type="button" style="cursor:pointer;padding:7px 12px">Source</button>
+      <button class="pill" data-mode="watermarked" type="button" style="cursor:pointer;padding:7px 12px">Watermarked</button>
+      <button class="pill" data-mode="slider"      type="button" style="cursor:pointer;padding:7px 12px">Slider</button>
+      <button class="pill" data-mode="diff"         type="button" style="cursor:pointer;padding:7px 12px">Diff</button>
+      <button class="pill" data-mode="psnr"         type="button" style="cursor:pointer;padding:7px 12px">Localized PSNR</button>
+      <button id="gfull" type="button" class="pill" style="cursor:pointer;padding:7px 12px">⛶ Fullscreen</button>
+    </div>
+  </div>
+  <div class="muted" id="gcaption" style="margin:8px 0"></div>
+  <div id="gstage">
+    <img id="gview" alt="">
+    <div id="gsplitview" class="compare" style="display:none">
+      <img id="gsrcimg" alt="source">                       {# base: source (right of handle) #}
+      <canvas id="gwmcanvas" class="cmp-wm"></canvas>        {# overlay: watermarked / diff / PSNR, clipped to the left #}
+      <span class="cmp-label cmp-left" id="gleftlabel">watermarked</span>
+      <span class="cmp-label cmp-right">source</span>
+      <div id="gslider" class="cmp-handle"><div class="cmp-grip"></div></div>
+    </div>
+  </div>
+  </div>{# /#gviewer #}
+  {% endif %}
+
+  {% if agg.distortion_preview %}
+  <h2>Distortion preview</h2>
+  <p class="muted">Each distortion applied to the source image currently open in the
+    viewer above <span id="dpcaption"></span> (view-only).</p>
+  <div style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap">
+    <div><label class="muted" for="dpgroup">Group</label><br>
+      <select id="dpgroup" style="margin-top:4px;background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 8px"></select></div>
+    <div><label class="muted" for="dpdist">Distortion</label><br>
+      <select id="dpdist" style="margin-top:4px;background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 8px"></select></div>
+  </div>
+  <div class="chart-box" style="margin-top:10px"><img id="dpimg" alt="" style="max-width:100%;display:block"></div>
+  {% endif %}
+
+  <p class="muted" style="margin-top:40px">
+    Built by <code>wmbench</code>. Charts render locally from a vendored Chart.js — no external requests.
+  </p>
+</main>
+
+<script src="assets/chart.umd.min.js"></script>
+<script>
+const DATA = {{ data_json|safe }};
+const PALETTE = ["#5aa9ff","#7ee787","#ffa657","#ff7b72","#d2a8ff","#79c0ff","#f2cc60","#56d4dd"];
+const color = i => PALETTE[i % PALETTE.length];
+
+Chart.defaults.color = "#9aa0aa";
+Chart.defaults.borderColor = "#2a2f3a";
+
+// --- quality-vs-extraction scatter; dropdowns pick the Y metric and the X
+//     extraction scope (all distortions / a group / a single distortion) ---
+const metricSel = document.getElementById("qmetric");
+const groupSel = document.getElementById("qgroup");
+const distSel = document.getElementById("qdist");
+const DEFAULT_METRIC = DATA.metrics.includes("ssimulacra2") ? "ssimulacra2" : DATA.metrics[0];
+DATA.metrics.forEach((m) => {
+  const o = document.createElement("option");
+  o.value = m; o.textContent = m; if (m === DEFAULT_METRIC) o.selected = true;
+  metricSel.appendChild(o);
+});
+
+const GROUPS = DATA.groups || [];
+const GROUP_OF = DATA.group_of || {};
+const opt = (sel, value, text) => {
+  const o = document.createElement("option"); o.value = value; o.textContent = text; sel.appendChild(o);
+};
+// Group dropdown: "all" + each thematic group
+opt(groupSel, "all", "all distortions");
+GROUPS.forEach((g) => opt(groupSel, g, g));
+
+// Distortion dropdown: filtered to the selected group; "*" = whole selection
+function fillDistOptions() {
+  distSel.innerHTML = "";
+  const g = groupSel.value;
+  opt(distSel, "*", g === "all" ? "— all —" : "— all in group —");
+  (DATA.distortions || [])
+    .filter((d) => g === "all" || GROUP_OF[d] === g)
+    .forEach((d) => opt(distSel, d, d));
+}
+fillDistOptions();
+
+// Resolve the two dropdowns to an aggregate-rates scope key.
+function currentScope() {
+  if (distSel.value && distSel.value !== "*") return "dist:" + distSel.value;
+  return groupSel.value === "all" ? "all" : "group:" + groupSel.value;
+}
+function scopeLabel() {
+  if (distSel.value && distSel.value !== "*") return "distortion · " + distSel.value;
+  return groupSel.value === "all" ? "all distortions" : "group · " + groupSel.value;
+}
+const xOf = (p, scope) =>
+  (p.rates && p.rates[scope] != null) ? p.rates[scope] : p.extraction_rate;
+
+function scatterDatasets(metric, scope) {
+  return DATA.algorithms.map((a, i) => ({
+    label: a,
+    backgroundColor: color(i),
+    pointRadius: 7,
+    pointHoverRadius: 9,
+    data: DATA.points
+      .filter(p => p.algo === a && xOf(p, scope) != null && p.quality[metric] != null)
+      .map(p => ({ x: xOf(p, scope), y: p.quality[metric] })),
+  }));
+}
+
+const scatter = new Chart(document.getElementById("scatter"), {
+  type: "scatter",
+  data: { datasets: scatterDatasets(DEFAULT_METRIC, currentScope()) },
+  options: {
+    plugins: {
+      title: { display: true, text: "Quality vs. extraction rate" },
+      tooltip: { callbacks: {
+        title: (items) => items.length ? items[0].dataset.label : "",
+        label: (ctx) => {
+          const num = (v, d = 3) => (v == null ? "—" : v.toFixed(d));
+          const p = DATA.points.find(p => p.algo === ctx.dataset.label) || {};
+          return [
+            `extraction rate (${scopeLabel()}): ${num(ctx.raw.x)}`,
+            `${metricSel.value}: ${num(ctx.raw.y, 2)}`,
+            `mean confidence: ${num(p.mean_confidence)}`,
+            `false-positive rate: ${num(p.fpr)}`,
+          ];
+        },
+      } },
+    },
+    scales: {
+      x: { title: { display: true, text: "extraction rate · all distortions" }, min: 0, max: 1 },
+      y: { title: { display: true, text: DEFAULT_METRIC } },
+    },
+  },
+});
+
+function updateScatter() {
+  scatter.data.datasets = scatterDatasets(metricSel.value, currentScope());
+  scatter.options.scales.y.title.text = metricSel.value;
+  scatter.options.scales.x.title.text = "extraction rate · " + scopeLabel();
+  scatter.update();
+}
+metricSel.addEventListener("change", updateScatter);
+groupSel.addEventListener("change", () => { fillDistOptions(); updateScatter(); });
+distSel.addEventListener("change", updateScatter);
+
+// --- image viewer: source / watermarked / slider / diff / localized PSNR ---
+// Slider / Diff / PSNR all use the before/after slider: the LEFT (watermarked)
+// side is a canvas showing the watermarked image, its amplified diff, or a
+// localized-PSNR heatmap; the RIGHT side is the untouched source.
+const GALLERY = DATA.gallery || [];
+if (GALLERY.length) {
+  const $ = (id) => document.getElementById(id);
+  const gimg = $("gimg"), galgo = $("galgo"), gviewer = $("gviewer"),
+        gview = $("gview"), gsplitview = $("gsplitview"), gsrcimg = $("gsrcimg"),
+        gwmcanvas = $("gwmcanvas"), gslider = $("gslider"), gleftlabel = $("gleftlabel"),
+        gcap = $("gcaption"), bFull = $("gfull");
+  const modeBtns = Array.from(document.querySelectorAll("#gmodes [data-mode]"));
+  const SLIDER_MODES = { slider: 1, diff: 1, psnr: 1 };
+
+  GALLERY.forEach((g, i) => {
+    const o = document.createElement("option");
+    o.value = i; o.textContent = g.image; gimg.appendChild(o);
+  });
+  DATA.algorithms.forEach((a) => {
+    const o = document.createElement("option");
+    o.value = a; o.textContent = a; galgo.appendChild(o);
+  });
+
+  let mode = "slider";   // DEFAULT
+  let pos = 50;          // slider divider position (%)
+  let token = 0;         // guards async overlay drawing against rapid switching
+  const num = (v, d = 2) => (v == null ? "—" : v.toFixed(d));
+
+  function qcap(g, algo) {
+    const q = (g.quality && g.quality[algo]) || {};
+    return `SSIMULACRA2 ${num(q.ssimulacra2)} · VMAF ${num(q.vmaf)}` +
+           ` · xPSNR ${num(q.xpsnr)} · PSNR-HVS-M ${num(q.psnr_hvs_m)}`;
+  }
+  function setPos(p) {  // reveal the left `pos%` of the watermarked overlay
+    pos = Math.max(0, Math.min(100, p));
+    gwmcanvas.style.clipPath = `inset(0 ${100 - pos}% 0 0)`;
+    gslider.style.left = pos + "%";
+  }
+  function show(which) {
+    gview.style.display = which === "img" ? "block" : "none";
+    gsplitview.style.display = which === "slider" ? "block" : "none";
+  }
+
+  const imgCache = {};
+  function loadImg(url) {
+    return imgCache[url] || (imgCache[url] = new Promise((res, rej) => {
+      const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = url;
+    }));
+  }
+  function pixels(im, w, h) {
+    const c = document.createElement("canvas"); c.width = w; c.height = h;
+    const x = c.getContext("2d", { willReadFrequently: true });
+    x.drawImage(im, 0, 0, w, h);
+    return x.getImageData(0, 0, w, h).data;
+  }
+  // Common PSNR colour scale across ALL algorithms/images (from the benchmark),
+  // so the same colour means the same degradation everywhere. Falls back to a
+  // fixed range if the bounds are absent.
+  const PSNR_LO = (DATA.meta && DATA.meta.psnr_block_min != null) ? DATA.meta.psnr_block_min : 33;
+  const PSNR_HI = (DATA.meta && DATA.meta.psnr_block_max != null) ? DATA.meta.psnr_block_max : 50;
+  function psnrColor(p) {  // red (low PSNR) -> green (high)
+    const span = (PSNR_HI - PSNR_LO) || 1;
+    let t = Math.max(0, Math.min(1, (p - PSNR_LO) / span));
+    return [Math.round(235 * (1 - t)), Math.round(200 * t), 40];
+  }
+
+  function drawDiff(ctx, sd, wd, w, h) {
+    const amp = 12, out = ctx.createImageData(w, h), o = out.data;
+    for (let i = 0; i < o.length; i += 4) {
+      o[i]   = Math.min(255, Math.abs(wd[i]   - sd[i])   * amp);
+      o[i+1] = Math.min(255, Math.abs(wd[i+1] - sd[i+1]) * amp);
+      o[i+2] = Math.min(255, Math.abs(wd[i+2] - sd[i+2]) * amp);
+      o[i+3] = 255;
+    }
+    ctx.putImageData(out, 0, 0);
+  }
+  function drawPsnr(ctx, wm, sd, wd, w, h) {
+    ctx.drawImage(wm, 0, 0, w, h);
+    const B = 32;
+    for (let by = 0; by < h; by += B) {
+      const ymax = Math.min(by + B, h);
+      for (let bx = 0; bx < w; bx += B) {
+        const xmax = Math.min(bx + B, w);
+        let se = 0, n = 0;
+        for (let y = by; y < ymax; y++) {
+          let idx = (y * w + bx) * 4;
+          for (let x = bx; x < xmax; x++) {
+            const dr = wd[idx] - sd[idx], dg = wd[idx+1] - sd[idx+1], db = wd[idx+2] - sd[idx+2];
+            se += dr*dr + dg*dg + db*db; n += 3; idx += 4;
+          }
+        }
+        const mse = n ? se / n : 0;
+        const psnr = mse <= 0 ? 99 : 10 * Math.log10(255 * 255 / mse);
+        const [r, gc, b] = psnrColor(psnr);
+        ctx.fillStyle = `rgba(${r},${gc},${b},0.33)`;
+        ctx.fillRect(bx, by, xmax - bx, ymax - by);
+      }
+    }
+  }
+
+  async function render() {
+    const g = GALLERY[Number(gimg.value)], algo = galgo.value;
+    const wmSrc = g.watermarked ? g.watermarked[algo] : null;
+    modeBtns.forEach((b) => b.classList.toggle("active", b.dataset.mode === mode));
+
+    if (!SLIDER_MODES[mode]) {           // full-image source / watermarked
+      show("img");
+      if (mode === "source") { gview.src = g.source; gcap.textContent = "source (unwatermarked)"; }
+      else {
+        gview.src = wmSrc || g.source;
+        gcap.textContent = wmSrc ? `watermarked · ${algo} — ${qcap(g, algo)}`
+                                 : `(${algo} has no watermarked image) — showing source`;
+      }
+      return;
+    }
+
+    // slider / diff / psnr — base = source, overlay canvas = watermarked layer
+    show("slider");
+    gsrcimg.src = g.source;
+    setPos(pos);
+    gleftlabel.textContent = mode === "diff" ? "diff" : (mode === "psnr" ? "PSNR" : "watermarked");
+    if (!wmSrc) { gcap.textContent = `(${algo} has no watermarked image)`; return; }
+
+    const my = ++token;
+    const labelQ = qcap(g, algo);
+    let src, wm;
+    try { [src, wm] = await Promise.all([loadImg(g.source), loadImg(wmSrc)]); }
+    catch (e) { gcap.textContent = "could not load images"; return; }
+    if (my !== token) return;
+
+    const w = wm.naturalWidth, h = wm.naturalHeight;
+    gwmcanvas.width = w; gwmcanvas.height = h;
+    const ctx = gwmcanvas.getContext("2d", { willReadFrequently: true });
+
+    if (mode === "slider") {
+      ctx.drawImage(wm, 0, 0, w, h);
+      gcap.textContent = `drag to compare — left: watermarked (${algo}), right: source · ${labelQ}`;
+      return;
+    }
+    // diff / psnr need pixel data (blocked on file://)
+    let sd, wd;
+    try { sd = pixels(src, w, h); wd = pixels(wm, w, h); }
+    catch (e) {
+      ctx.drawImage(wm, 0, 0, w, h);
+      gcap.textContent = "pixel read blocked on file:// — serve over http (e.g. `python -m http.server` in site/)";
+      return;
+    }
+    if (mode === "diff") {
+      drawDiff(ctx, sd, wd, w, h);
+      gcap.textContent = `drag to compare — left: difference ×12 (${algo}), right: source · ${labelQ}`;
+    } else {  // psnr
+      drawPsnr(ctx, wm, sd, wd, w, h);
+      gcap.textContent = `drag to compare — left: localized PSNR 32×32 (${algo}), right: source · ` +
+        `common scale ${PSNR_LO.toFixed(1)}dB (red) → ${PSNR_HI.toFixed(1)}dB (green) · ${labelQ}`;
+    }
+  }
+
+  gsrcimg.addEventListener("load", () => {
+    if (gsrcimg.naturalWidth)
+      gsplitview.style.aspectRatio = gsrcimg.naturalWidth + " / " + gsrcimg.naturalHeight;
+  });
+  let dragging = false;
+  const toPos = (clientX) => {
+    const r = gsplitview.getBoundingClientRect();
+    return ((clientX - r.left) / r.width) * 100;
+  };
+  gsplitview.addEventListener("pointerdown", (e) => {
+    dragging = true; gsplitview.setPointerCapture(e.pointerId); setPos(toPos(e.clientX));
+  });
+  gsplitview.addEventListener("pointermove", (e) => { if (dragging) setPos(toPos(e.clientX)); });
+  gsplitview.addEventListener("pointerup", () => { dragging = false; });
+
+  modeBtns.forEach((b) => b.addEventListener("click", () => { mode = b.dataset.mode; render(); }));
+  gimg.addEventListener("change", render);
+  galgo.addEventListener("change", render);
+  bFull.addEventListener("click", () => {
+    if (document.fullscreenElement) { document.exitFullscreen(); return; }
+    (gviewer.requestFullscreen || gviewer.webkitRequestFullscreen).call(gviewer);
+  });
+  render();
+}
+
+// --- distortion preview: one image's source under each distortion,
+//     with the same cascading Group + Distortion dropdowns ---
+const DP = DATA.distortion_preview;
+if (DP && DP.by_image && Object.keys(DP.by_image).length) {
+  const gimg = document.getElementById("gimg");          // shared with the viewer
+  const gsel = document.getElementById("dpgroup");
+  const dsel = document.getElementById("dpdist");
+  const im = document.getElementById("dpimg");
+  const cap = document.getElementById("dpcaption");
+  const imageNames = Object.keys(DP.by_image);
+  const base = DP.by_image[imageNames[0]];               // distortion list is the same per image
+
+  // which image is open in the viewer
+  function curImage() {
+    if (gimg && DATA.gallery && DATA.gallery[Number(gimg.value)])
+      return DATA.gallery[Number(gimg.value)].image;
+    return imageNames[0];
+  }
+
+  const dpGroups = [];
+  base.forEach((d) => { if (!dpGroups.includes(d.group)) dpGroups.push(d.group); });
+  dpGroups.forEach((g) => {
+    const o = document.createElement("option"); o.value = g; o.textContent = g; gsel.appendChild(o);
+  });
+  function fillDpDist() {  // option value = distortion NAME; path resolved per image
+    dsel.innerHTML = "";
+    base.filter((d) => d.group === gsel.value).forEach((d) => {
+      const o = document.createElement("option"); o.value = d.name; o.textContent = d.name;
+      dsel.appendChild(o);
+    });
+  }
+  function showDp() {
+    const name = curImage();
+    const entries = DP.by_image[name] || base;
+    const ent = entries.find((d) => d.name === dsel.value);
+    if (ent) im.src = ent.path;
+    if (cap) cap.textContent = "— " + name;
+  }
+  gsel.addEventListener("change", () => { fillDpDist(); showDp(); });
+  dsel.addEventListener("change", showDp);
+  if (gimg) gimg.addEventListener("change", showDp);     // follow the viewer image
+  fillDpDist();
+  showDp();
+}
+</script>
+</body>
+</html>

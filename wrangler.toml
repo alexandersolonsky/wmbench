@@ -1,0 +1,8 @@
+# Cloudflare Workers static-assets deploy of the self-contained report (site/).
+# Assets-only Worker (no server code) — `wrangler deploy` serves site/ at
+# https://wmbench.<your-subdomain>.workers.dev. Build site/ first (scripts/run_all.sh).
+name = "wmbench"
+compatibility_date = "2025-09-01"
+
+[assets]
+directory = "./site"

@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wmbench"
+version = "0.1.0"
+description = "A benchmark framework for image watermarking algorithms"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "Pillow>=10.0",
+    "numpy>=1.24",
+    "PyYAML>=6.0",
+    "Jinja2>=3.1",
+]
+
+# Optional, heavy/CPU integrations. Install only where benchmarks actually run
+# (a VPS / local box) — CI never installs these.
+[project.optional-dependencies]
+trustmark = ["trustmark"]
+pixelseal = ["videoseal"]
+# WAM (watermark-anything) is installed from its git repo + manual weights; see README.
+dev = ["pytest>=7.4"]
+
+[project.scripts]
+wmbench = "wmbench.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+wmbench = ["report/templates/*.j2", "report/static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
