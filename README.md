@@ -139,18 +139,17 @@ pass (result-vector clustering) can trim near-duplicate frames to a lean, divers
 ## Deploy
 
 The `site/` folder is **fully self-contained** (HTML + vendored Chart.js +
-`results.json` + image gallery), so hosting = serve that folder.
+`results.json` + image gallery), so hosting = serve that folder. The gallery is
+large (~GBs) and **not committed**, so deploy the *local* `site/` to a host
+without a tight size cap. Build it first with `scripts/run_all.sh`, then:
 
-- **GitHub Pages** — the `pages` workflow rebuilds the page from the committed
-  `results.json` and deploys; it **never runs torch or the metric tools**. The
-  image *gallery* is not committed (too large), so on Pages the charts/tables/
-  scatter work but the image viewer is empty. Enable once under
-  *Settings → Pages → Source: GitHub Actions*.
-- **Full report (with the image viewer)** — deploy the local `site/` to a host
-  without GitHub's ~1 GB cap:
-  - Cloudflare Workers (static assets): `wrangler deploy` (config in `wrangler.toml`)
-  - Netlify: `npx netlify deploy --dir=site --prod`
-  - A VPS: `rsync -avz --delete site/ user@vps:/var/www/wmbench/` behind nginx/Caddy
+```bash
+scripts/deploy.sh cloudflare        # Cloudflare Workers static assets (wrangler.toml -> ./site)
+```
+
+Alternatives: `scripts/deploy.sh netlify`, or a VPS via
+`WMBENCH_VPS=user@host:/var/www/wmbench scripts/deploy.sh vps`. (GitHub Pages is
+not used — its ~1 GB cap can't serve the gallery, and it can't host LFS objects.)
 
 ## Layout
 
