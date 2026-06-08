@@ -44,3 +44,6 @@ results/*_full103.json
 
 # Curated CC-BY image set kept local, like img/ (not bundled — attribution req'd)
 img_pruned/
+
+# Cloudflare wrangler local cache
+.wrangler/

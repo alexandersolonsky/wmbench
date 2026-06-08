@@ -41,5 +41,5 @@ distortions:
   - gamma_0.5
   - telea_grid
 output_dir: ./.runs/wam
-save_samples: 200          # gallery entries (algo×image) saved for the web viewer
+save_samples: 500          # gallery entries (algo×image) saved for the web viewer
 resume: true              # reuse cached results; only compute new distortions/algos (fresh run: delete .runs)

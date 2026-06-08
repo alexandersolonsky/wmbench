@@ -1,5 +1,5 @@
 # pixelseal benchmark run — executed in its own isolated environment (see scripts/run_all.sh).
-algorithms: [pixelseal_sw0.2, pixelseal_sw0.4]
+algorithms: [pixelseal_sw0.2, pixelseal_sw0.4, pixelseal_sw0.2_bch100, pixelseal_sw0.2_bch64, pixelseal_sw0.2_bch40]
 input_dir: ./img_pruned     # curated lean set (redundancy-pruned)
 distortions:
   - none
@@ -41,5 +41,5 @@ distortions:
   - gamma_0.5
   - telea_grid
 output_dir: ./.runs/ps
-save_samples: 200          # gallery entries (algo×image) saved for the web viewer
+save_samples: 500          # gallery entries (algo×image) saved for the web viewer
 resume: true              # reuse cached results; only compute new distortions/algos (fresh run: delete .runs)

@@ -1,5 +1,25 @@
 # trustmark benchmark run — executed in its own isolated environment (see scripts/run_all.sh).
-algorithms: [trustmark_P_40, trustmark_P_61, trustmark_P_68, trustmark_P_75, trustmark_P_100]
+algorithms:
+  - trustmark_Q_40
+  - trustmark_Q_61
+  - trustmark_Q_68
+  - trustmark_Q_75
+  - trustmark_Q_100
+  - trustmark_P_40
+  - trustmark_P_61
+  - trustmark_P_68
+  - trustmark_P_75
+  - trustmark_P_100
+  - trustmark_B_40
+  - trustmark_B_61
+  - trustmark_B_68
+  - trustmark_B_75
+  - trustmark_B_100
+  - trustmark_C_40
+  - trustmark_C_61
+  - trustmark_C_68
+  - trustmark_C_75
+  - trustmark_C_100
 input_dir: ./img_pruned     # curated lean set (redundancy-pruned)
 distortions:
   - none
@@ -41,5 +61,5 @@ distortions:
   - gamma_0.5
   - telea_grid
 output_dir: ./.runs/tm
-save_samples: 200          # gallery entries (algo×image) saved for the web viewer
+save_samples: 500          # gallery entries (algo×image) saved for the web viewer
 resume: true              # reuse cached results; only compute new distortions/algos (fresh run: delete .runs)

@@ -76,11 +76,13 @@ class TrustMarkAdapter:
                              confidence=1.0 if present else 0.0)
 
 
-# Error-correction sweep on the highest-quality 'P' model: stronger BCH ECC
-# corrects more bit errors (higher extraction) but carries fewer payload bits.
-# Variant names are suffixed by usable data-bit capacity.
-for _name, _ecc in (("trustmark_P_40", "BCH_SUPER"), ("trustmark_P_61", "BCH_5"),
-                    ("trustmark_P_68", "BCH_4"), ("trustmark_P_75", "BCH_3"),
-                    ("trustmark_P_100", "NONE")):
-    register_algorithm(_name)(
-        lambda n=_name, e=_ecc: TrustMarkAdapter(model_type="P", name=n, ecc=e))
+# Error-correction sweep across ALL four model types (Q/P/B/C). Each model gets
+# the same BCH ladder (stronger ECC corrects more bit errors but carries fewer
+# payload bits). Variant name = trustmark_<model>_<usable data bits>.
+_ECC_BITS = (("40", "BCH_SUPER"), ("61", "BCH_5"), ("68", "BCH_4"),
+             ("75", "BCH_3"), ("100", "NONE"))
+for _model in ("Q", "P", "B", "C"):
+    for _bits, _ecc in _ECC_BITS:
+        _name = f"trustmark_{_model}_{_bits}"
+        register_algorithm(_name)(
+            lambda n=_name, m=_model, e=_ecc: TrustMarkAdapter(model_type=m, name=n, ecc=e))

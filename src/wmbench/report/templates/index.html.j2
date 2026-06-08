@@ -79,6 +79,14 @@
         <label class="muted" for="qdist">…distortion</label><br>
         <select id="qdist" style="margin-top:6px;width:100%;background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 8px"></select>
       </div>
+      <div>
+        <label class="muted" for="qalgo">Algorithm</label><br>
+        <select id="qalgo" style="margin-top:6px;width:100%;background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 8px"></select>
+      </div>
+      <div>
+        <label class="muted" for="qmodel">…model</label><br>
+        <select id="qmodel" style="margin-top:6px;width:100%;background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 8px"></select>
+      </div>
     </div>
     <div class="chart-box" style="flex:1 1 auto; min-width:0"><canvas id="scatter"></canvas></div>
   </div>
@@ -147,16 +155,44 @@
   <div class="chart-box" style="margin-top:10px"><img id="dpimg" alt="" style="max-width:100%;display:block"></div>
   {% endif %}
 
-  <p class="muted" style="margin-top:40px">
-    Built by <code>wmbench</code>. Charts render locally from a vendored Chart.js — no external requests.
-  </p>
 </main>
 
 <script src="assets/chart.umd.min.js"></script>
 <script>
 const DATA = {{ data_json|safe }};
-const PALETTE = ["#5aa9ff","#7ee787","#ffa657","#ff7b72","#d2a8ff","#79c0ff","#f2cc60","#56d4dd"];
-const color = i => PALETTE[i % PALETTE.length];
+// Per-variant colour: HUE encodes the model/family, SHADE the bit/strength
+// profile within that family (darker = stronger ECC / lower setting).
+const FAMILY_HUE = {
+  trustmark_Q: 210, trustmark_P: 145, trustmark_B: 0, trustmark_C: 280,
+  pixelseal: 32, wam: 190, invismark: 320,
+};
+const FALLBACK = ["#5aa9ff","#7ee787","#ffa657","#ff7b72","#d2a8ff","#79c0ff","#f2cc60","#56d4dd"];
+const familyOf = (a) => {
+  const m = a.match(/^(trustmark_[QPBC])_/); if (m) return m[1];
+  if (a.startsWith("pixelseal")) return "pixelseal";
+  if (a.startsWith("wam")) return "wam";
+  if (a.startsWith("invismark")) return "invismark";
+  return a;
+};
+const paramOf = (a) => { const m = a.match(/([\d.]+)$/); return m ? parseFloat(m[1]) : 0; };
+// rank each family's variants by their numeric knob so the shades form a gradient
+const FAM_SORTED = {};
+(DATA.algorithms || []).forEach((a) => {
+  const f = familyOf(a); (FAM_SORTED[f] = FAM_SORTED[f] || []).push(paramOf(a));
+});
+Object.keys(FAM_SORTED).forEach((f) => {
+  FAM_SORTED[f] = [...new Set(FAM_SORTED[f])].sort((x, y) => x - y);
+});
+const _famFallback = {}; let _fbIdx = 0;
+function colorOf(a, alpha = 1) {
+  const f = familyOf(a), hue = FAMILY_HUE[f];
+  if (hue == null) { if (!(f in _famFallback)) _famFallback[f] = FALLBACK[_fbIdx++ % FALLBACK.length]; return _famFallback[f]; }
+  const sorted = FAM_SORTED[f] || [0], n = sorted.length;
+  const idx = Math.max(0, sorted.indexOf(paramOf(a)));
+  const L = n > 1 ? (48 + 34 * idx / (n - 1)) : 62;   // 48%(strong) .. 82%(weak)
+  return `hsla(${hue}, 72%, ${L}%, ${alpha})`;
+}
+const color = (i) => FALLBACK[i % FALLBACK.length];  // legacy fallback
 
 Chart.defaults.color = "#9aa0aa";
 Chart.defaults.borderColor = "#2a2f3a";
@@ -193,6 +229,31 @@ function fillDistOptions() {
 }
 fillDistOptions();
 
+// Algorithm + model filters: narrow which variants appear on the scatter.
+const algoSel = document.getElementById("qalgo");
+const modelSel = document.getElementById("qmodel");
+const backendOf = (a) => a.split("_")[0];                 // trustmark / pixelseal / wam
+const modelOf = (a) => {                                   // Q/P/B/C for trustmark, else strength
+  const m = a.match(/^trustmark_([QPBC])_/); if (m) return m[1];
+  const b = backendOf(a); return a.slice(b.length + 1);    // e.g. "sw0.2"
+};
+const ALGOS = DATA.algorithms || [];
+opt(algoSel, "all", "all algorithms");
+[...new Set(ALGOS.map(backendOf))].forEach((b) => opt(algoSel, b, b));
+function fillModelOptions() {
+  modelSel.innerHTML = "";
+  const b = algoSel.value;
+  opt(modelSel, "all", b === "all" ? "— all —" : "— all models —");
+  if (b !== "all")
+    [...new Set(ALGOS.filter((a) => backendOf(a) === b).map(modelOf))]
+      .forEach((m) => opt(modelSel, m, m));
+  modelSel.disabled = (b === "all");
+}
+fillModelOptions();
+const variantVisible = (a) =>
+  (algoSel.value === "all" || backendOf(a) === algoSel.value) &&
+  (modelSel.value === "all" || modelOf(a) === modelSel.value);
+
 // Resolve the two dropdowns to an aggregate-rates scope key.
 function currentScope() {
   if (distSel.value && distSel.value !== "*") return "dist:" + distSel.value;
@@ -206,9 +267,12 @@ const xOf = (p, scope) =>
   (p.rates && p.rates[scope] != null) ? p.rates[scope] : p.extraction_rate;
 
 function scatterDatasets(metric, scope) {
-  return DATA.algorithms.map((a, i) => ({
+  return DATA.algorithms.filter(variantVisible).map((a) => ({
     label: a,
-    backgroundColor: color(i),
+    backgroundColor: colorOf(a),
+    borderColor: colorOf(a),
+    pointBorderColor: "rgba(13,17,23,0.75)",
+    pointBorderWidth: 1,
     pointRadius: 7,
     pointHoverRadius: 9,
     data: DATA.points
@@ -253,6 +317,8 @@ function updateScatter() {
 metricSel.addEventListener("change", updateScatter);
 groupSel.addEventListener("change", () => { fillDistOptions(); updateScatter(); });
 distSel.addEventListener("change", updateScatter);
+algoSel.addEventListener("change", () => { fillModelOptions(); updateScatter(); });
+modelSel.addEventListener("change", updateScatter);
 
 // --- image viewer: source / watermarked / slider / diff / localized PSNR ---
 // Slider / Diff / PSNR all use the before/after slider: the LEFT (watermarked)
