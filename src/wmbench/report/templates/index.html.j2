@@ -101,10 +101,10 @@
   <p class="muted">Configuration each algorithm ran with (all CPU).</p>
   <table>
     <thead><tr><th>Algorithm</th><th>Settings used</th></tr></thead>
-    <tbody>
+    <tbody id="asettings">
       {% for algo in agg.algorithms %}
       {% set s = agg.algorithm_settings.get(algo) or {} %}
-      <tr><td>{{ algo }}</td>
+      <tr data-algo="{{ algo }}"><td>{{ algo }}</td>
         <td>{% for k, v in s.items() %}{{ k }} = {{ v if v is not none else "—" }}{% if not loop.last %} · {% endif %}{% endfor %}</td></tr>
       {% endfor %}
     </tbody>
@@ -313,6 +313,7 @@ function updateScatter() {
   scatter.options.scales.y.title.text = metricSel.value;
   scatter.options.scales.x.title.text = "extraction rate · " + scopeLabel();
   scatter.update();
+  filterSettings();
   syncUrl();
 }
 metricSel.addEventListener("change", updateScatter);
@@ -325,6 +326,12 @@ modelSel.addEventListener("change", updateScatter);
 // The scatter filters are mirrored into the URL (shareable) and applied on load.
 function setSel(sel, val) {
   if (val != null && [...sel.options].some((o) => o.value === val)) sel.value = val;
+}
+// keep the "algorithm settings" table in sync with the algo/model filter
+function filterSettings() {
+  document.querySelectorAll("#asettings tr[data-algo]").forEach((tr) => {
+    tr.style.display = variantVisible(tr.dataset.algo) ? "" : "none";
+  });
 }
 function syncUrl() {
   const q = new URLSearchParams();
