@@ -313,12 +313,39 @@ function updateScatter() {
   scatter.options.scales.y.title.text = metricSel.value;
   scatter.options.scales.x.title.text = "extraction rate · " + scopeLabel();
   scatter.update();
+  syncUrl();
 }
 metricSel.addEventListener("change", updateScatter);
 groupSel.addEventListener("change", () => { fillDistOptions(); updateScatter(); });
 distSel.addEventListener("change", updateScatter);
 algoSel.addEventListener("change", () => { fillModelOptions(); updateScatter(); });
 modelSel.addEventListener("change", updateScatter);
+
+// --- deep-linking: e.g. ?algo=trustmark&model=B  or  ?algo=pixelseal&metric=vmaf
+// The scatter filters are mirrored into the URL (shareable) and applied on load.
+function setSel(sel, val) {
+  if (val != null && [...sel.options].some((o) => o.value === val)) sel.value = val;
+}
+function syncUrl() {
+  const q = new URLSearchParams();
+  if (metricSel.value !== DEFAULT_METRIC) q.set("metric", metricSel.value);
+  if (groupSel.value !== "all") q.set("group", groupSel.value);
+  if (distSel.value && distSel.value !== "*") q.set("dist", distSel.value);
+  if (algoSel.value !== "all") q.set("algo", algoSel.value);
+  if (modelSel.value && modelSel.value !== "all") q.set("model", modelSel.value);
+  const qs = q.toString();
+  history.replaceState(null, "", qs ? "?" + qs : location.pathname);
+}
+function applyUrlParams() {
+  const q = new URLSearchParams(location.search);
+  setSel(metricSel, q.get("metric"));
+  if (q.has("group")) { setSel(groupSel, q.get("group")); fillDistOptions(); }
+  setSel(distSel, q.get("dist"));
+  if (q.has("algo")) { setSel(algoSel, q.get("algo")); fillModelOptions(); }
+  setSel(modelSel, q.get("model"));
+  updateScatter();
+}
+applyUrlParams();
 
 // --- image viewer: source / watermarked / slider / diff / localized PSNR ---
 // Slider / Diff / PSNR all use the before/after slider: the LEFT (watermarked)
