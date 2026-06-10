@@ -132,10 +132,25 @@ def aggregate(payload: dict) -> dict:
             "quality": quality_by_algo[algo],
         })
 
+    # Per-distortion descriptor for the info panel: group, the transform's params,
+    # and mean exact-ID across all variants (relative difficulty of that op).
+    dist_meta = {}
+    for d in distortions:
+        if d == "none":
+            continue
+        drows = [r for r in wm if r["distortion"] == d]
+        dist_meta[d] = {
+            "group": group_of.get(d, "none"),
+            "params": next((r.get("params") for r in drows if r.get("params")), {}) or {},
+            "mean_rate": _rate(drows),
+            "n_variants": len({r["algo"] for r in drows}),
+        }
+
     return {
         "algorithms": algorithms,
         "algorithm_settings": payload.get("algorithm_settings", {}),
         "distortions": distortions,
+        "distortion_meta": dist_meta,
         "groups": groups,
         "group_of": group_of,
         "scopes": scopes,

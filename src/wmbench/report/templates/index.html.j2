@@ -90,6 +90,7 @@
     </div>
     <div class="chart-box" style="flex:1 1 auto; min-width:0"><canvas id="scatter"></canvas></div>
   </div>
+  <div id="distinfo" style="display:none;margin-top:10px;padding:10px 12px;background:var(--card);border:1px solid var(--line);border-radius:8px;font-size:13px;line-height:1.5"></div>
 
   <p class="muted" style="margin-top:14px">
     <strong>Timing (CPU)</strong> —
@@ -266,6 +267,11 @@ function scopeLabel() {
 const xOf = (p, scope) =>
   (p.rates && p.rates[scope] != null) ? p.rates[scope] : p.extraction_rate;
 
+// tiny deterministic jitter so coincident variants (e.g. identical BCH-profile
+// results) fan out instead of hiding each other; tooltips report the true values.
+function _hash(s){let h=2166136261;for(let i=0;i<s.length;i++)h=Math.imul(h^s.charCodeAt(i),16777619);return h>>>0;}
+function jitterXY(a){const h=_hash(a);return [((h%9)-4)/750, (((h>>4)%9)-4)/7];}
+
 function scatterDatasets(metric, scope) {
   return DATA.algorithms.filter(variantVisible).map((a) => ({
     label: a,
@@ -277,7 +283,8 @@ function scatterDatasets(metric, scope) {
     pointHoverRadius: 9,
     data: DATA.points
       .filter(p => p.algo === a && xOf(p, scope) != null && p.quality[metric] != null)
-      .map(p => ({ x: xOf(p, scope), y: p.quality[metric] })),
+      .map(p => { const j = jitterXY(a);
+        return { x: Math.max(0, Math.min(1, xOf(p, scope) + j[0])), y: p.quality[metric] + j[1] }; }),
   }));
 }
 
@@ -293,8 +300,8 @@ const scatter = new Chart(document.getElementById("scatter"), {
           const num = (v, d = 3) => (v == null ? "—" : v.toFixed(d));
           const p = DATA.points.find(p => p.algo === ctx.dataset.label) || {};
           return [
-            `extraction rate (${scopeLabel()}): ${num(ctx.raw.x)}`,
-            `${metricSel.value}: ${num(ctx.raw.y, 2)}`,
+            `extraction rate (${scopeLabel()}): ${num(xOf(p, currentScope()))}`,
+            `${metricSel.value}: ${num((p.quality || {})[metricSel.value], 2)}`,
             `mean confidence: ${num(p.mean_confidence)}`,
             `false-positive rate: ${num(p.fpr)}`,
           ];
@@ -308,12 +315,41 @@ const scatter = new Chart(document.getElementById("scatter"), {
   },
 });
 
+// Info panel: shown only when a specific group/distortion is selected (not "all").
+const DMETA = DATA.distortion_meta || {};
+function renderDistInfo() {
+  const box = document.getElementById("distinfo");
+  const pct = (v) => (v == null ? "—" : (v * 100).toFixed(1) + "%");
+  const dist = (distSel.value && distSel.value !== "*") ? distSel.value : null;
+  const grp = groupSel.value !== "all" ? groupSel.value : null;
+  if (!dist && !grp) { box.style.display = "none"; return; }
+  if (dist) {
+    const m = DMETA[dist] || {};
+    const params = Object.entries(m.params || {})
+      .map(([k, v]) => `<code>${k}</code> = ${v}`).join(" &middot; ") || "—";
+    box.innerHTML =
+      `<strong>${dist}</strong> <span class="muted">&middot; group ${m.group}</span><br>` +
+      `<span class="muted">transform:</span> ${params}<br>` +
+      `<span class="muted">mean exact-ID across ${m.n_variants} variants:</span> <strong>${pct(m.mean_rate)}</strong>`;
+  } else {
+    const ds = DATA.distortions.filter((d) => DATA.group_of[d] === grp && d !== "none");
+    const rs = ds.map((d) => (DMETA[d] || {}).mean_rate).filter((v) => v != null);
+    const avg = rs.length ? rs.reduce((a, b) => a + b, 0) / rs.length : null;
+    box.innerHTML =
+      `<strong>group &middot; ${grp}</strong> <span class="muted">&middot; ${ds.length} distortions</span><br>` +
+      `<span class="muted">members:</span> ${ds.join(", ")}<br>` +
+      `<span class="muted">mean exact-ID across the group:</span> <strong>${pct(avg)}</strong>`;
+  }
+  box.style.display = "";
+}
+
 function updateScatter() {
   scatter.data.datasets = scatterDatasets(metricSel.value, currentScope());
   scatter.options.scales.y.title.text = metricSel.value;
   scatter.options.scales.x.title.text = "extraction rate · " + scopeLabel();
   scatter.update();
   filterSettings();
+  renderDistInfo();
   syncUrl();
 }
 metricSel.addEventListener("change", updateScatter);
