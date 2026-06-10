@@ -87,6 +87,10 @@
         <label class="muted" for="qmodel">…model</label><br>
         <select id="qmodel" style="margin-top:6px;width:100%;background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 8px"></select>
       </div>
+      <div>
+        <label class="muted" for="qbits">Bit profile</label><br>
+        <select id="qbits" style="margin-top:6px;width:100%;background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 8px"></select>
+      </div>
     </div>
     <div class="chart-box" style="flex:1 1 auto; min-width:0"><canvas id="scatter"></canvas></div>
   </div>
@@ -251,9 +255,28 @@ function fillModelOptions() {
   modelSel.disabled = (b === "all");
 }
 fillModelOptions();
+
+// Bit-profile filter: threshold buckets over each variant's user-payload bits.
+const SETTINGS = DATA.algorithm_settings || {};
+const bitsOf = (a) => (SETTINGS[a] || {}).payload_bits;
+const bitsSel = document.getElementById("qbits");
+const BIT_PROFILES = [
+  ["all", "all profiles", () => true],
+  ["le40", "≤ 40 bits", (n) => n != null && n <= 40],
+  ["le64", "≤ 64 bits", (n) => n != null && n <= 64],
+  ["ge64", "≥ 64 bits", (n) => n != null && n >= 64],
+  ["ge100", "≥ 100 bits", (n) => n != null && n >= 100],
+];
+BIT_PROFILES.forEach(([v, t]) => opt(bitsSel, v, t));
+const bitsMatch = (a) => {
+  const f = (BIT_PROFILES.find((p) => p[0] === bitsSel.value) || BIT_PROFILES[0])[2];
+  return f(bitsOf(a));
+};
+
 const variantVisible = (a) =>
   (algoSel.value === "all" || backendOf(a) === algoSel.value) &&
-  (modelSel.value === "all" || modelOf(a) === modelSel.value);
+  (modelSel.value === "all" || modelOf(a) === modelSel.value) &&
+  bitsMatch(a);
 
 // Resolve the two dropdowns to an aggregate-rates scope key.
 function currentScope() {
@@ -357,6 +380,7 @@ groupSel.addEventListener("change", () => { fillDistOptions(); updateScatter(); 
 distSel.addEventListener("change", updateScatter);
 algoSel.addEventListener("change", () => { fillModelOptions(); updateScatter(); });
 modelSel.addEventListener("change", updateScatter);
+bitsSel.addEventListener("change", updateScatter);
 
 // --- deep-linking: e.g. ?algo=trustmark&model=B  or  ?algo=pixelseal&metric=vmaf
 // The scatter filters are mirrored into the URL (shareable) and applied on load.
@@ -376,6 +400,7 @@ function syncUrl() {
   if (distSel.value && distSel.value !== "*") q.set("dist", distSel.value);
   if (algoSel.value !== "all") q.set("algo", algoSel.value);
   if (modelSel.value && modelSel.value !== "all") q.set("model", modelSel.value);
+  if (bitsSel.value !== "all") q.set("bits", bitsSel.value);
   const qs = q.toString();
   history.replaceState(null, "", qs ? "?" + qs : location.pathname);
 }
@@ -386,6 +411,7 @@ function applyUrlParams() {
   setSel(distSel, q.get("dist"));
   if (q.has("algo")) { setSel(algoSel, q.get("algo")); fillModelOptions(); }
   setSel(modelSel, q.get("model"));
+  setSel(bitsSel, q.get("bits"));
   updateScatter();
 }
 applyUrlParams();
