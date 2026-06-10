@@ -60,6 +60,13 @@ distortions:
   - hue_180
   - gamma_0.5
   - telea_grid
+  - c2pa_instagram
+  - c2pa_facebook
+  - c2pa_whatsapp
+  - c2pa_screenshot
+  - c2pa_webp
+  - c2pa_overlay
+  - c2pa_recapture
 output_dir: ./.runs/tm
 save_samples: 500          # gallery entries (algo×image) saved for the web viewer
 resume: true              # reuse cached results; only compute new distortions/algos (fresh run: delete .runs)

@@ -17,10 +17,14 @@ distortion equally. ``none`` is the control. Real groups are added one at a time
                    saturation, hue, gamma), strong magnitudes
   * inpaint      — block-removal inpainting attack: remove the inner 6x6 of every
                    8x8 block and refill with the classical Telea inpainter (telea_grid)
+  * c2pa         — content-provenance lifecycle transforms that strip a C2PA
+                   manifest (social re-encode, transcode, screenshot, recapture,
+                   re-share overlay) — the durable-watermark soft-binding test
 """
 
 from __future__ import annotations
 
+import io
 import math
 import subprocess
 import tempfile
@@ -380,3 +384,129 @@ class TeleaGridInpaint:
 
 
 register_distortion("telea_grid")(lambda: TeleaGridInpaint())
+
+
+# --------------------------------------------------------------------------- #
+# Group: c2pa — content-provenance lifecycle transforms. C2PA stores provenance
+# in a signed *manifest* (metadata); these simulate the real-world operations
+# that strip that manifest while leaving the image usable — social re-encode,
+# format transcode, screenshot, recapture (analog hole), re-share overlay —
+# against which a durable watermark is the "soft binding" fallback. Done in PIL so
+# the JPEG quality matches what platforms actually report (not ffmpeg's qscale).
+# --------------------------------------------------------------------------- #
+_CHROMA = {0: "4:4:4", 1: "4:2:2", 2: "4:2:0"}
+
+
+def _jpeg_pil(img: Image.Image, quality: int, subsampling: int = 2) -> Image.Image:
+    buf = io.BytesIO()
+    img.convert("RGB").save(buf, "JPEG", quality=quality, subsampling=subsampling)
+    buf.seek(0)
+    return Image.open(buf).convert("RGB")
+
+
+def _fit_long_edge(img: Image.Image, n: int) -> Image.Image:
+    """Downscale (only) so the long edge is at most ``n`` px, keeping aspect."""
+    w, h = img.size
+    if max(w, h) <= n:
+        return img
+    s = n / float(max(w, h))
+    return img.resize((max(1, round(w * s)), max(1, round(h * s))), Image.LANCZOS)
+
+
+class C2paResave:
+    """Platform re-upload: cap the long edge + JPEG re-encode (strips the C2PA
+    manifest and recompresses) — the canonical 'does my mark survive a repost?'."""
+
+    group = "c2pa"
+
+    def __init__(self, name: str, long_edge: int, quality: int, subsampling: int = 2) -> None:
+        self.name = name
+        self._le, self._q, self._ss = long_edge, quality, subsampling
+        self.params = {"long_edge_px": long_edge, "jpeg_quality": quality,
+                       "chroma": _CHROMA[subsampling]}
+
+    def apply(self, image: Image.Image) -> Image.Image:
+        return _jpeg_pil(_fit_long_edge(image.convert("RGB"), self._le), self._q, self._ss)
+
+
+class C2paWebp:
+    """Format transcode to WebP (common platform/CDN conversion; drops metadata)."""
+
+    group = "c2pa"
+    name = "c2pa_webp"
+
+    def __init__(self) -> None:
+        self.params = {"format": "webp", "quality": 80}
+
+    def apply(self, image: Image.Image) -> Image.Image:
+        buf = io.BytesIO()
+        image.convert("RGB").save(buf, "WEBP", quality=80)
+        buf.seek(0)
+        return Image.open(buf).convert("RGB")
+
+
+class C2paOverlay:
+    """Re-share with a semi-transparent caption/logo bar, then JPEG (republishing)."""
+
+    group = "c2pa"
+    name = "c2pa_overlay"
+
+    def __init__(self) -> None:
+        self.params = {"overlay": "caption bar (alpha 0.55)", "then": "jpeg_q85"}
+
+    def apply(self, image: Image.Image) -> Image.Image:
+        from PIL import ImageDraw
+        img = image.convert("RGBA")
+        w, h = img.size
+        ov = Image.new("RGBA", img.size, (0, 0, 0, 0))
+        d = ImageDraw.Draw(ov)
+        bar = max(28, h // 12)
+        d.rectangle([0, h - bar, w, h], fill=(0, 0, 0, 140))
+        d.text((max(8, w // 80), h - bar + bar // 4), "RE-SHARED", fill=(255, 255, 255, 235))
+        out = Image.alpha_composite(img, ov).convert("RGB")
+        return _jpeg_pil(out, 85, 1)
+
+
+def _persp_coeffs(out_pts, in_pts):
+    """PIL PERSPECTIVE coefficients sampling input ``in_pts[i]`` at output ``out_pts[i]``."""
+    import numpy as np
+    A, b = [], []
+    for (ox, oy), (ix, iy) in zip(out_pts, in_pts):
+        A.append([ox, oy, 1, 0, 0, 0, -ox * ix, -oy * ix]); b.append(ix)
+        A.append([0, 0, 0, ox, oy, 1, -ox * iy, -oy * iy]); b.append(iy)
+    return np.linalg.solve(np.asarray(A, float), np.asarray(b, float)).tolist()
+
+
+class C2paRecapture:
+    """Analog hole: photo-of-screen / print-and-scan — mild keystone perspective,
+    optical blur, sensor noise, then JPEG. Metadata is always lost on recapture."""
+
+    group = "c2pa"
+    name = "c2pa_recapture"
+
+    def __init__(self) -> None:
+        self.params = {"ops": "keystone+blur+sensor-noise", "then": "jpeg_q70"}
+
+    def apply(self, image: Image.Image) -> Image.Image:
+        import numpy as np
+        from PIL import ImageFilter
+        img = image.convert("RGB")
+        w, h = img.size
+        dx, dy = w * 0.02, h * 0.015
+        frame = [(0, 0), (w, 0), (w, h), (0, h)]
+        dst = [(dx, dy * 1.5), (w - dx * 0.4, 0), (w, h - dy), (dx * 0.4, h - dy * 0.4)]
+        img = img.transform((w, h), Image.PERSPECTIVE,
+                            _persp_coeffs(dst, frame), Image.BILINEAR)
+        img = img.filter(ImageFilter.GaussianBlur(0.8))
+        a = np.asarray(img, np.int16)
+        a = np.clip(a + np.random.RandomState(0).normal(0, 4.0, a.shape), 0, 255).astype("uint8")
+        return _jpeg_pil(Image.fromarray(a, "RGB"), 70, 2)
+
+
+register_distortion("c2pa_instagram")(lambda: C2paResave("c2pa_instagram", 1080, 80))
+register_distortion("c2pa_facebook")(lambda: C2paResave("c2pa_facebook", 2048, 72))
+register_distortion("c2pa_whatsapp")(lambda: C2paResave("c2pa_whatsapp", 1600, 60))
+register_distortion("c2pa_screenshot")(lambda: C2paResave("c2pa_screenshot", 1280, 92, 0))
+register_distortion("c2pa_webp")(lambda: C2paWebp())
+register_distortion("c2pa_overlay")(lambda: C2paOverlay())
+register_distortion("c2pa_recapture")(lambda: C2paRecapture())
